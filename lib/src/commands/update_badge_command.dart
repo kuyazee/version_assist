@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as path;
+import 'package:version_assist/src/manifest_version.dart';
 
 /// {@template update_badge_command}
 /// A command which updates version badges in README.md
@@ -41,22 +42,11 @@ class UpdateBadgeCommand extends Command<int> {
   @override
   String get name => 'badge';
 
-  /// Extracts version from pubspec.yaml content
-  String? _extractVersion(String content) {
-    final versionPattern = RegExp(r'version:\s+(\d+\.\d+\.\d+(?:\+\d+)?)');
-    final match = versionPattern.firstMatch(content);
-    return match?.group(1);
-  }
-
-  /// Updates version badge in README.md content
-  String _updateVersionBadge(String content, String version) {
-    final badgePattern =
-        RegExp(r'\[pub_version_badge\]:.+v[\d\.]+(?:\+\d+)?-blue');
-    return content.replaceFirst(
-      badgePattern,
-      '[pub_version_badge]: https://img.shields.io/badge/pub-v$version-blue',
-    );
-  }
+  static final _badge = RegExp(
+    r'^ {0,3}\[pub_version_badge\]:[ \t]+https://img\.shields\.io/badge/pub-v'
+    r'(\d+\.\d+\.\d+(?:\+\d+)?)(?=-blue\b)',
+    multiLine: true,
+  );
 
   @override
   Future<int> run() async {
@@ -73,7 +63,7 @@ class UpdateBadgeCommand extends Command<int> {
       }
 
       final pubspecContent = await pubspecFile.readAsString();
-      final version = _extractVersion(pubspecContent);
+      final version = ManifestVersion.parse(pubspecContent)?.value;
 
       if (version == null) {
         _logger.err('Could not find valid version in pubspec.yaml');
@@ -88,7 +78,18 @@ class UpdateBadgeCommand extends Command<int> {
       }
 
       final readmeContent = await readmeFile.readAsString();
-      final updatedContent = _updateVersionBadge(readmeContent, version);
+      final match = _badge.firstMatch(readmeContent);
+      if (match == null) {
+        _logger.err(
+          'Could not find the [pub_version_badge] reference in $readmePath',
+        );
+        return ExitCode.usage.code;
+      }
+      final currentVersion = match.group(1)!;
+      if (currentVersion == version) {
+        _logger.info('Version badge is already v$version');
+        return ExitCode.success.code;
+      }
 
       if (isDryRun) {
         _logger.info('Would update version badge to v$version');
@@ -96,11 +97,17 @@ class UpdateBadgeCommand extends Command<int> {
       }
 
       // Write updated README.md
-      await readmeFile.writeAsString(updatedContent);
+      await readmeFile.writeAsString(
+        readmeContent.replaceRange(
+          match.end - currentVersion.length,
+          match.end,
+          version,
+        ),
+      );
       _logger.success('Successfully updated version badge to v$version');
 
       return ExitCode.success.code;
-    } catch (error) {
+    } on Exception catch (error) {
       _logger.err('$error');
       return ExitCode.software.code;
     }

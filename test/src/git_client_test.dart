@@ -1,27 +1,29 @@
+import 'dart:io';
+
 import 'package:test/test.dart';
 import 'package:version_assist/src/git_client.dart';
 
 void main() {
-  group('GitClient', () {
-    late GitClient gitClient;
-
-    setUp(() {
-      gitClient = const GitClient();
-    });
-
-    test('isTestEnvironment returns true during tests', () {
-      expect(GitClient.isTestEnvironment, isTrue);
-    });
-
-    test('git operations return success in test environment', () async {
-      // All git operations should return success (exit code 0) in test environment
-      expect((await gitClient.stageFile('test.txt')).exitCode, equals(0));
-      expect(
-        (await gitClient.commit('test commit')).exitCode,
-        equals(0),
-      );
-      expect((await gitClient.tag('v1.0.0')).exitCode, equals(0));
-      expect(await gitClient.isFileStaged('test.txt'), isFalse);
-    });
+  test('stages a file in the specified repository', () async {
+    final directory =
+        await Directory.systemTemp.createTemp('version_assist_git_');
+    addTearDown(() => directory.delete(recursive: true));
+    final result = await Process.run(
+      'git',
+      ['init', '--quiet'],
+      workingDirectory: directory.path,
+    );
+    expect(result.exitCode, 0);
+    final client = GitClient(workingDirectory: directory.path);
+    const filename = '-file[0].yaml';
+    await File('${directory.path}/-file0.yaml').writeAsString('leave unstaged');
+    await File('${directory.path}/$filename').writeAsString('version: 1.0.0\n');
+    expect((await client.stageFile(filename)).exitCode, 0);
+    final staged = await Process.run(
+      'git',
+      ['diff', '--cached', '--name-only'],
+      workingDirectory: directory.path,
+    );
+    expect(staged.stdout, '$filename\n');
   });
 }

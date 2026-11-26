@@ -4,6 +4,8 @@ import 'package:args/command_runner.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as path;
 import 'package:version_assist/src/commands/commit_command.dart';
+import 'package:version_assist/src/git_client.dart';
+import 'package:version_assist/src/manifest_version.dart';
 
 /// {@template version_set_command}
 /// A command which manually sets the version in pubspec.yaml
@@ -12,7 +14,9 @@ class VersionSetCommand extends Command<int> {
   /// {@macro version_set_command}
   VersionSetCommand({
     required Logger logger,
-  }) : _logger = logger {
+    GitClient? gitClient,
+  })  : _gitClient = gitClient,
+        _logger = logger {
     argParser
       ..addOption(
         'path',
@@ -24,7 +28,6 @@ class VersionSetCommand extends Command<int> {
         'version',
         abbr: 'v',
         help: 'Version to set (format: x.y.z or x.y.z+build)',
-        mandatory: true,
       )
       ..addFlag(
         'dry-run',
@@ -39,6 +42,7 @@ class VersionSetCommand extends Command<int> {
   }
 
   final Logger _logger;
+  final GitClient? _gitClient;
 
   @override
   String get description => 'Manually sets the version in pubspec.yaml';
@@ -50,13 +54,11 @@ class VersionSetCommand extends Command<int> {
   Future<int> run() async {
     try {
       final pubspecPath = argResults?['path'] as String;
-      final newVersion = argResults?['version'] as String;
+      final newVersion = argResults?['version'] as String?;
       final isDryRun = argResults?['dry-run'] as bool;
       final autoCommit = argResults?['auto-commit'] as bool;
 
-      // Validate version format
-      final versionPattern = RegExp(r'^\d+\.\d+\.\d+(?:\+\d+)?$');
-      if (!versionPattern.hasMatch(newVersion)) {
+      if (newVersion == null || !ManifestVersion.isSupported(newVersion)) {
         _logger.err(
           'Invalid version format. Must be x.y.z or x.y.z+build',
         );
@@ -72,17 +74,13 @@ class VersionSetCommand extends Command<int> {
 
       final content = await file.readAsString();
 
-      // Parse the current version
-      final currentVersionPattern =
-          RegExp(r'version:\s+(\d+\.\d+\.\d+(?:\+\d+)?)');
-      final match = currentVersionPattern.firstMatch(content);
-
-      if (match == null) {
+      final manifestVersion = ManifestVersion.parse(content);
+      if (manifestVersion == null) {
         _logger.err('Could not find valid version pattern in pubspec.yaml');
         return ExitCode.usage.code;
       }
 
-      final currentVersion = match.group(1)!;
+      final currentVersion = manifestVersion.value;
 
       if (isDryRun) {
         _logger.info(
@@ -92,8 +90,7 @@ class VersionSetCommand extends Command<int> {
       }
 
       // Replace the version in the content
-      final newContent =
-          content.replaceFirst(currentVersionPattern, 'version: $newVersion');
+      final newContent = manifestVersion.replaceIn(content, newVersion);
 
       // Write back to file
       await file.writeAsString(newContent);
@@ -101,15 +98,17 @@ class VersionSetCommand extends Command<int> {
 
       // Handle auto-commit if enabled
       if (autoCommit) {
-        final commitCommand = CommitCommand(logger: _logger);
-        final commitResult = await commitCommand.run();
+        final commitCommand =
+            CommitCommand(logger: _logger, gitClient: _gitClient);
+        final commitResult =
+            await commitCommand.runWith(pubspecPath: pubspecPath);
         if (commitResult != ExitCode.success.code) {
           return commitResult;
         }
       }
 
       return ExitCode.success.code;
-    } catch (error) {
+    } on Exception catch (error) {
       _logger.err('$error');
       return ExitCode.software.code;
     }

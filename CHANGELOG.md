@@ -1,6 +1,13 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## 1.4.0
+
+- Add `bump --date-based-version` for app versions such as `25.05.10`. Combine it with `--date-based-build-number` for `25.05.10+25051000`. The daily counter stops at 99.
+- Fix `set --auto-commit` and `--path` so Git stages the updated pubspec in its own repository. Existing staged changes are included; a duplicate tag is reported before Git creates a commit.
+- Read the top-level YAML version in `bump`, `set`, `badge` and `commit`. Keep comments, quotes and line endings intact and reject unsupported version formats.
+- Report a missing README badge reference instead of claiming an update.
+- Make `--version` suitable for scripts. Skip automatic update checks in CI and noninteractive shells, and never offer to downgrade the CLI.
+- Support current CLI dependencies while keeping the Dart 3.5 minimum.
 
 ## 1.3.4
 
@@ -15,6 +22,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Fixed commit command to preserve previously staged files instead of automatically staging all files
+
+## 1.3.2
+
+- Same CLI code as 1.3.1.
 
 ## 1.3.1
 
@@ -61,6 +72,10 @@ All notable changes to this project will be documented in this file.
 - Refactored git operations into separate commit command
 - Maintained backward compatibility with --auto-commit flag
 - Improved code reuse between bump and commit commands
+
+## 1.2.0
+
+- Added `badge` to update the README version badge and `commit` to create a version commit and tag.
 
 ## 1.1.0 - 2024-02-08
 

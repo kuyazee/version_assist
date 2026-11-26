@@ -1,0 +1,48 @@
+name: Publish
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/version_assist.yaml
+
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    environment: pub.dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version: *//p' pubspec.yaml)"
+          [[ "v$version" = "$GITHUB_REF_NAME" ]]
+          curl --fail --silent --show-error --retry 3 --output "$RUNNER_TEMP/package.json" https://pub.dev/api/packages/version_assist
+          published="$(jq -ers --arg v "$version" '
+            if length == 1 and (.[0].name == "version_assist") and
+               (.[0].versions | type == "array" and length > 0 and
+                all(.[]; (.version | type) == "string"))
+            then (any(.[0].versions[]; .version == $v) | tostring)
+            else error("unexpected pub.dev package record") end
+          ' "$RUNNER_TEMP/package.json")"
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+      - if: steps.version.outputs.published == 'false'
+        uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
+      - if: steps.version.outputs.published == 'false'
+        run: dart pub publish --dry-run
+      - if: steps.version.outputs.published == 'false'
+        run: dart pub publish --force

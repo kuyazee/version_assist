@@ -1,4 +1,4 @@
-/// version_assist, A Very Good Project created by Very Good CLI.
+/// Manage version numbers in Dart and Flutter projects.
 ///
 /// ```sh
 /// # activate version_assist

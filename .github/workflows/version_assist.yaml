@@ -1,55 +1,68 @@
-name: version_assist
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+name: CI
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/version_assist.yaml"
-      - "lib/**"
-      - "test/**"
-      - "pubspec.yaml"
   push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/version_assist.yaml"
-      - "lib/**"
-      - "test/**"
-      - "pubspec.yaml"
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  semantic-pull-request:
-    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/semantic_pull_request.yml@v1
+  dart:
+    name: Dart ${{ matrix.sdk }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ['3.5.0', stable]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
+        with:
+          sdk: ${{ matrix.sdk }}
+      - run: dart pub get
+      - if: matrix.sdk == 'stable'
+        run: dart format --output=none --set-exit-if-changed bin lib test example
+      - run: dart analyze --fatal-infos
+      - run: dart test --coverage=coverage
+      - name: Smoke-test the installed CLI
+        run: |
+          dart pub global activate --source path .
+          expected="$(sed -n 's/^version: *//p' pubspec.yaml)"
+          cd "$RUNNER_TEMP"
+          cli=(dart pub global run version_assist:version_assist)
+          [[ "$("${cli[@]}" --version)" = "$expected" ]]
+          printf 'version: 1.2.3\n' > pubspec.yaml
+          "${cli[@]}" bump --patch --dry-run
+          grep -Fx 'version: 1.2.3' pubspec.yaml
+          "${cli[@]}" bump --patch
+          grep -Fx 'version: 1.2.4' pubspec.yaml
+      - name: Check line coverage
+        if: matrix.sdk == 'stable'
+        run: |
+          dart run coverage:format_coverage --lcov --in=coverage --out=coverage/lcov.info --report-on=lib
+          awk -F, '/^DA:/ { total++; if ($2 > 0) hit++ } END { if (!total) exit 1; printf "%.1f%% line coverage\n", 100*hit/total; exit (100*hit < 80*total) }' coverage/lcov.info
 
-  build:
-    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/dart_package.yml@v1
+  semantic-pull-request:
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/semantic_pull_request.yml@61d25935870f12a1f2c23f2a04d5f193c83f4e5d # v1
 
   spell-check:
-    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/spell_check.yml@v1
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/spell_check.yml@61d25935870f12a1f2c23f2a04d5f193c83f4e5d # v1
     with:
-      includes: |
-        **/*.md
-        !brick/**/*.md
-        .*/**/*.md
-      modified_files_only: false
-
-  verify-version:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 📚 Git Checkout
-        uses: actions/checkout@v2
-
-      - name: 🎯 Setup Dart
-        uses: dart-lang/setup-dart@v1
-        with:
-          sdk: "stable"
-
-      - name: 📦 Install Dependencies
-        run: |
-          dart pub get
-
-      - name: 🔎 Verify version
-        run: dart run test --run-skipped -t version-verify
+      includes: '**/*.md'
+      modified_files_only: true

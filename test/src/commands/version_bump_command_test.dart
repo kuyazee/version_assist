@@ -1,18 +1,17 @@
-import 'dart:io';
-
 import 'package:mason_logger/mason_logger.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 import 'package:version_assist/src/command_runner.dart';
 
-class _MockLogger extends Mock implements Logger {}
+import '../fixture.dart';
 
-class _MockFile extends Mock implements File {}
+class _MockLogger extends Mock implements Logger {}
 
 class _MockProgress extends Mock implements Progress {}
 
 void main() {
   group('version bump', () {
+    late CommandFixture fixture;
     late Logger logger;
     late Progress progress;
     late VersionAssistCommandRunner commandRunner;
@@ -23,9 +22,15 @@ void main() {
     });
 
     setUp(() {
+      fixture = CommandFixture();
+      addTearDown(fixture.dispose);
       logger = _MockLogger();
       progress = _MockProgress();
-      commandRunner = VersionAssistCommandRunner(logger: logger);
+      commandRunner = VersionAssistCommandRunner(
+        logger: logger,
+        pubUpdater: fixture.updater,
+        gitClient: fixture.git,
+      );
 
       // Set up default mock behavior for logger
       when(() => logger.progress(any())).thenReturn(progress);
@@ -44,12 +49,9 @@ description: A test application
 version: 1.0.0
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['bump', '--major']);
+      final exitCode = await fixture.run(commandRunner, ['bump', '--major']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.success('Successfully bumped version to 2.0.0'))
@@ -63,13 +65,10 @@ description: A test application
 version: 1.0.0
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode =
-          await commandRunner.run(['bump', '--major', '--add-build-number']);
+      final exitCode = await fixture
+          .run(commandRunner, ['bump', '--major', '--add-build-number']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.success('Successfully bumped version to 2.0.0+1'))
@@ -83,13 +82,10 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode =
-          await commandRunner.run(['bump', '--major', '--no-build-number']);
+      final exitCode = await fixture
+          .run(commandRunner, ['bump', '--major', '--no-build-number']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.success('Successfully bumped version to 2.0.0'))
@@ -103,16 +99,17 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner
-          .run(['bump', '--add-build-number', '--no-build-number']);
+      final exitCode = await fixture.run(
+        commandRunner,
+        ['bump', '--add-build-number', '--no-build-number'],
+      );
 
       expect(exitCode, ExitCode.usage.code);
       verify(
-        () => logger.err('Cannot use --add-build-number with --no-build-number'),
+        () =>
+            logger.err('Cannot use --add-build-number with --no-build-number'),
       ).called(1);
     });
 
@@ -123,11 +120,9 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run([
+      final exitCode = await fixture.run(commandRunner, [
         'bump',
         '--date-based-build-number',
         '--no-build-number',
@@ -148,11 +143,9 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['bump', '-d']);
+      final exitCode = await fixture.run(commandRunner, ['bump', '-d']);
 
       expect(exitCode, ExitCode.success.code);
       verify(
@@ -167,11 +160,10 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['bump', '--major', '--minor']);
+      final exitCode =
+          await fixture.run(commandRunner, ['bump', '--major', '--minor']);
 
       expect(exitCode, ExitCode.usage.code);
       verify(
@@ -187,26 +179,36 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['bump', '--major']);
+      final exitCode = await fixture.run(commandRunner, ['bump', '--major']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.success('Successfully bumped version to 2.0.0+2'))
           .called(1);
     });
 
-    test('handles file not found', () async {
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => false);
+    test('increments large numeric components without wrapping', () async {
+      const value = '9223372036854775807';
+      fixture.pubspec.writeAsStringSync('version: 1.0.$value+$value\n');
 
-      final exitCode = await commandRunner.run(['bump']);
+      expect(
+        await fixture.run(commandRunner, ['bump', '--patch']),
+        ExitCode.success.code,
+      );
+      expect(
+        fixture.pubspec.readAsStringSync(),
+        'version: 1.0.9223372036854775808+9223372036854775808\n',
+      );
+    });
+
+    test('handles file not found', () async {
+      final exitCode = await fixture.run(commandRunner, ['bump']);
 
       expect(exitCode, ExitCode.usage.code);
-      verify(() => logger.err('pubspec.yaml not found at pubspec.yaml')).called(1);
+      verify(
+        () => logger.err('pubspec.yaml not found at ${fixture.pubspec.path}'),
+      ).called(1);
     });
 
     test('handles invalid version format', () async {
@@ -216,14 +218,16 @@ description: A test application
 version: invalid.version.format
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['bump']);
+      final exitCode = await fixture.run(commandRunner, ['bump']);
 
-      expect(exitCode, ExitCode.software.code);
-      verify(() => logger.err(any())).called(1);
+      expect(exitCode, ExitCode.usage.code);
+      verify(
+        () => logger.err(
+          'Could not find valid version pattern in pubspec.yaml',
+        ),
+      ).called(1);
     });
 
     test('generates date-based build number', () async {
@@ -233,13 +237,10 @@ description: A test application
 version: 1.0.0+230901
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode =
-          await commandRunner.run(['bump', '--date-based-build-number']);
+      final exitCode = await fixture
+          .run(commandRunner, ['bump', '--date-based-build-number']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.success(any())).called(1);
@@ -255,16 +256,16 @@ description: A test application
 version: 1.0.0+${datePrefix}01
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode =
-          await commandRunner.run(['bump', '--date-based-build-number']);
+      final exitCode = await fixture
+          .run(commandRunner, ['bump', '--date-based-build-number']);
 
       expect(exitCode, ExitCode.success.code);
-      verify(() => logger.success(any())).called(1);
+      expect(
+        fixture.pubspec.readAsStringSync(),
+        contains('1.0.0+${datePrefix}02'),
+      );
     });
 
     test('auto-commits version bump', () async {
@@ -274,18 +275,17 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['bump', '--auto-commit']);
+      final exitCode =
+          await fixture.run(commandRunner, ['bump', '--auto-commit']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.success('Successfully bumped version to 1.0.0+2'))
           .called(1);
       verify(
-        () => logger.success('Successfully created version commit and tag for 1.0.0+2'),
+        () => logger
+            .success('Successfully created version commit and tag for 1.0.0+2'),
       ).called(1);
     });
   });

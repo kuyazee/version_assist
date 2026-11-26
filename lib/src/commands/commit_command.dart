@@ -4,6 +4,7 @@ import 'package:args/command_runner.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as path;
 import 'package:version_assist/src/git_client.dart';
+import 'package:version_assist/src/manifest_version.dart';
 
 /// {@template commit_command}
 /// A command which creates a version commit and tag
@@ -14,7 +15,7 @@ class CommitCommand extends Command<int> {
     required Logger logger,
     GitClient? gitClient,
   })  : _logger = logger,
-        _gitClient = gitClient ?? const GitClient() {
+        _gitClient = gitClient {
     argParser
       ..addOption(
         'path',
@@ -31,20 +32,13 @@ class CommitCommand extends Command<int> {
   }
 
   final Logger _logger;
-  final GitClient _gitClient;
+  final GitClient? _gitClient;
 
   @override
   String get description => 'Creates a version commit and tag';
 
   @override
   String get name => 'commit';
-
-  /// Extracts version from pubspec.yaml content
-  String? _extractVersion(String content) {
-    final versionPattern = RegExp(r'version:\s+(\d+\.\d+\.\d+(?:\+\d+)?)');
-    final match = versionPattern.firstMatch(content);
-    return match?.group(1);
-  }
 
   /// Runs the commit command with explicit parameters
   /// This allows other commands to use the commit functionality directly
@@ -61,7 +55,7 @@ class CommitCommand extends Command<int> {
       }
 
       final pubspecContent = await pubspecFile.readAsString();
-      final version = _extractVersion(pubspecContent);
+      final version = ManifestVersion.parse(pubspecContent)?.value;
 
       if (version == null) {
         _logger.err('Could not find valid version in pubspec.yaml');
@@ -76,33 +70,44 @@ class CommitCommand extends Command<int> {
         return ExitCode.success.code;
       }
 
-      // Only stage pubspec.yaml if it's not already staged
-      if (!await _gitClient.isFileStaged(pubspecPath)) {
-        final gitAdd = await _gitClient.stageFile(pubspecPath);
-        if (gitAdd.exitCode != 0) {
-          _logger.err('Error during git add: ${gitAdd.stderr as String}');
-          return ExitCode.software.code;
-        }
+      final git = _gitClient ??
+          GitClient(workingDirectory: pubspecFile.absolute.parent.path);
+      final existingTag = await git.listTags(version);
+      if (existingTag.exitCode != 0) {
+        _logger.err('Error checking git tag: ${existingTag.stderr}');
+        return ExitCode.software.code;
+      }
+      if ((existingTag.stdout as String).trim().isNotEmpty) {
+        _logger.err('Git tag $version already exists');
+        return ExitCode.software.code;
+      }
+
+      // Refresh the index even if an older version of the file was staged.
+      final gitAdd = await git.stageFile(pubspecFile.absolute.path);
+      if (gitAdd.exitCode != 0) {
+        _logger.err('Error during git add: ${gitAdd.stderr as String}');
+        return ExitCode.software.code;
       }
 
       final commitMessage = 'build(version): Bump version to $version';
-      final gitCommit = await _gitClient.commit(commitMessage);
+      final gitCommit = await git.commit(commitMessage);
 
       if (gitCommit.exitCode != 0) {
         _logger.err('Error during git commit: ${gitCommit.stderr as String}');
         return ExitCode.software.code;
       }
 
-      final gitTag = await _gitClient.tag(version);
+      final gitTag = await git.tag(version);
 
       if (gitTag.exitCode != 0) {
         _logger.err('Error during git tag: ${gitTag.stderr as String}');
         return ExitCode.software.code;
       }
 
-      _logger.success('Successfully created version commit and tag for $version');
+      _logger
+          .success('Successfully created version commit and tag for $version');
       return ExitCode.success.code;
-    } catch (error) {
+    } on Exception catch (error) {
       _logger.err('$error');
       return ExitCode.software.code;
     }

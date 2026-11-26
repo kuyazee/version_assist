@@ -1,18 +1,17 @@
-import 'dart:io';
-
 import 'package:mason_logger/mason_logger.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 import 'package:version_assist/src/command_runner.dart';
 
-class _MockLogger extends Mock implements Logger {}
+import '../fixture.dart';
 
-class _MockFile extends Mock implements File {}
+class _MockLogger extends Mock implements Logger {}
 
 class _MockProgress extends Mock implements Progress {}
 
 void main() {
   group('version set', () {
+    late CommandFixture fixture;
     late Logger logger;
     late Progress progress;
     late VersionAssistCommandRunner commandRunner;
@@ -23,9 +22,15 @@ void main() {
     });
 
     setUp(() {
+      fixture = CommandFixture();
+      addTearDown(fixture.dispose);
       logger = _MockLogger();
       progress = _MockProgress();
-      commandRunner = VersionAssistCommandRunner(logger: logger);
+      commandRunner = VersionAssistCommandRunner(
+        logger: logger,
+        pubUpdater: fixture.updater,
+        gitClient: fixture.git,
+      );
 
       // Set up default mock behavior for logger
       when(() => logger.progress(any())).thenReturn(progress);
@@ -44,15 +49,14 @@ description: A test application
 version: 1.0.0
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['set', '--version', '2.0.0']);
+      final exitCode =
+          await fixture.run(commandRunner, ['set', '--version', '2.0.0']);
 
       expect(exitCode, ExitCode.success.code);
-      verify(() => logger.success('Successfully set version to 2.0.0')).called(1);
+      verify(() => logger.success('Successfully set version to 2.0.0'))
+          .called(1);
     });
 
     test('sets version with build number', () async {
@@ -62,12 +66,10 @@ description: A test application
 version: 1.0.0
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['set', '--version', '2.0.0+1']);
+      final exitCode =
+          await fixture.run(commandRunner, ['set', '--version', '2.0.0+1']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.success('Successfully set version to 2.0.0+1'))
@@ -81,16 +83,15 @@ description: A test application
 version: 1.0.0
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode =
-          await commandRunner.run(['set', '--version', 'invalid.version']);
+      final exitCode = await fixture
+          .run(commandRunner, ['set', '--version', 'invalid.version']);
 
       expect(exitCode, ExitCode.usage.code);
       verify(
-        () => logger.err('Invalid version format. Must be x.y.z or x.y.z+build'),
+        () =>
+            logger.err('Invalid version format. Must be x.y.z or x.y.z+build'),
       ).called(1);
     });
 
@@ -101,12 +102,10 @@ description: A test application
 version: 1.0.0
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
       final exitCode =
-          await commandRunner.run(['set', '--version', '2.0.0', '-d']);
+          await fixture.run(commandRunner, ['set', '--version', '2.0.0', '-d']);
 
       expect(exitCode, ExitCode.success.code);
       verify(() => logger.info('Would change version from 1.0.0 to 2.0.0'))
@@ -114,18 +113,17 @@ version: 1.0.0
     });
 
     test('handles file not found', () async {
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => false);
-
-      final exitCode = await commandRunner.run(['set', '--version', '2.0.0']);
+      final exitCode =
+          await fixture.run(commandRunner, ['set', '--version', '2.0.0']);
 
       expect(exitCode, ExitCode.usage.code);
-      verify(() => logger.err('pubspec.yaml not found at pubspec.yaml'))
-          .called(1);
+      verify(
+        () => logger.err('pubspec.yaml not found at ${fixture.pubspec.path}'),
+      ).called(1);
     });
 
     test('handles missing version argument', () async {
-      final exitCode = await commandRunner.run(['set']);
+      final exitCode = await fixture.run(commandRunner, ['set']);
 
       expect(exitCode, ExitCode.usage.code);
     });
@@ -137,18 +135,17 @@ description: A test application
 version: 1.0.0
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
-      when(() => file.writeAsString(any())).thenAnswer((_) async => file);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner
-          .run(['set', '--version', '2.0.0', '--auto-commit']);
+      final exitCode = await fixture
+          .run(commandRunner, ['set', '--version', '2.0.0', '--auto-commit']);
 
       expect(exitCode, ExitCode.success.code);
-      verify(() => logger.success('Successfully set version to 2.0.0')).called(1);
+      verify(() => logger.success('Successfully set version to 2.0.0'))
+          .called(1);
       verify(
-        () => logger.success('Successfully created version commit and tag for 2.0.0'),
+        () => logger
+            .success('Successfully created version commit and tag for 2.0.0'),
       ).called(1);
     });
   });

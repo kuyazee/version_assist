@@ -1,48 +1,27 @@
 import 'dart:io';
 
-/// A client for interacting with git operations
+/// Runs Git commands in a repository.
 class GitClient {
-  /// Creates a new [GitClient]
-  const GitClient();
+  /// Creates a new [GitClient].
+  const GitClient({this.workingDirectory});
 
-  /// Whether we're running in a test environment
-  static bool get isTestEnvironment => Platform.environment['DART_TEST'] == 'true';
+  final String? workingDirectory;
 
-  /// Checks if a file is staged in git
-  Future<bool> isFileStaged(String filePath) async {
-    if (isTestEnvironment) return false;
+  Future<ProcessResult> _run(List<String> args) =>
+      Process.run('git', args, workingDirectory: workingDirectory);
 
-    final result = await Process.run(
-      'git',
-      ['diff', '--cached', '--name-only', filePath],
-    );
-    return (result.stdout as String).trim().isNotEmpty;
-  }
+  /// Lists tags matching [version].
+  Future<ProcessResult> listTags(String version) =>
+      _run(['tag', '--list', version]);
 
-  /// Stages a file in git
-  Future<ProcessResult> stageFile(String filePath) async {
-    if (isTestEnvironment) {
-      return ProcessResult(0, 0, '', '');
-    }
+  /// Stages only the named file, even if its name contains a pathspec wildcard.
+  Future<ProcessResult> stageFile(String filePath) =>
+      _run(['--literal-pathspecs', 'add', '--', filePath]);
 
-    return Process.run('git', ['add', filePath]);
-  }
+  /// Commits the index with the given message.
+  Future<ProcessResult> commit(String message) =>
+      _run(['commit', '-m', message]);
 
-  /// Creates a commit with the given message
-  Future<ProcessResult> commit(String message) async {
-    if (isTestEnvironment) {
-      return ProcessResult(0, 0, '', '');
-    }
-
-    return Process.run('git', ['commit', '-m', message]);
-  }
-
-  /// Creates a tag with the given name
-  Future<ProcessResult> tag(String tagName) async {
-    if (isTestEnvironment) {
-      return ProcessResult(0, 0, '', '');
-    }
-
-    return Process.run('git', ['tag', tagName]);
-  }
+  /// Creates a local tag at HEAD.
+  Future<ProcessResult> tag(String tagName) => _run(['tag', tagName]);
 }

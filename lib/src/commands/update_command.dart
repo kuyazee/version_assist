@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:mason_logger/mason_logger.dart';
+import 'package:pub_semver/pub_semver.dart';
 import 'package:pub_updater/pub_updater.dart';
 import 'package:version_assist/src/command_runner.dart';
 import 'package:version_assist/src/version.dart';
@@ -32,17 +33,23 @@ class UpdateCommand extends Command<int> {
   Future<int> run() async {
     final updateCheckProgress = _logger.progress('Checking for updates');
     late final String latestVersion;
+    late final int comparison;
     try {
       latestVersion = await _pubUpdater.getLatestVersion(packageName);
-    } catch (error) {
+      comparison =
+          Version.parse(latestVersion).compareTo(Version.parse(packageVersion));
+    } on Object catch (error) {
       updateCheckProgress.fail();
       _logger.err('$error');
       return ExitCode.software.code;
     }
     updateCheckProgress.complete('Checked for updates');
 
-    final isUpToDate = packageVersion == latestVersion;
-    if (isUpToDate) {
+    if (comparison < 0) {
+      _logger.info('The installed CLI is newer than the published version.');
+      return ExitCode.success.code;
+    }
+    if (comparison == 0) {
       _logger.info('CLI is already at the latest version.');
       return ExitCode.success.code;
     }
@@ -55,7 +62,7 @@ class UpdateCommand extends Command<int> {
         packageName: packageName,
         versionConstraint: latestVersion,
       );
-    } catch (error) {
+    } on Object catch (error) {
       updateProgress.fail();
       _logger.err('$error');
       return ExitCode.software.code;

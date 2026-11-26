@@ -1,11 +1,11 @@
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
-import 'package:intl/intl.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as path;
 import 'package:version_assist/src/commands/commit_command.dart';
 import 'package:version_assist/src/git_client.dart';
+import 'package:version_assist/src/manifest_version.dart';
 
 /// {@template version_bump_command}
 /// A command which updates the version in pubspec.yaml
@@ -15,8 +15,10 @@ class VersionBumpCommand extends Command<int> {
   VersionBumpCommand({
     required Logger logger,
     GitClient? gitClient,
-  })  : _logger = logger,
-        _gitClient = gitClient ?? const GitClient() {
+    DateTime Function() now = DateTime.now,
+  })  : _now = now,
+        _logger = logger,
+        _gitClient = gitClient {
     argParser
       ..addOption(
         'path',
@@ -28,6 +30,11 @@ class VersionBumpCommand extends Command<int> {
         'dry-run',
         abbr: 'd',
         help: 'Show what would happen without making changes',
+        negatable: false,
+      )
+      ..addFlag(
+        'date-based-version',
+        help: 'Set the app version to the local date (yy.MM.dd)',
         negatable: false,
       )
       ..addFlag(
@@ -67,8 +74,9 @@ class VersionBumpCommand extends Command<int> {
       );
   }
 
+  final DateTime Function() _now;
   final Logger _logger;
-  final GitClient _gitClient;
+  final GitClient? _gitClient;
 
   @override
   String get description => 'Updates the version in pubspec.yaml';
@@ -76,21 +84,20 @@ class VersionBumpCommand extends Command<int> {
   @override
   String get name => 'bump';
 
-  /// Generates a date-based build number in format yymmddbn
-  String _generateDateBasedBuildNumber(String currentBuildNumber) {
-    final now = DateTime.now();
-    final dateFormatter = DateFormat('yyMMdd');
-    final datePrefix = dateFormatter.format(now);
+  String _calendarVersion(DateTime date) {
+    String digits(int value) => value.toString().padLeft(2, '0');
+    return '${digits(date.year % 100)}.${digits(date.month)}.${digits(date.day)}';
+  }
 
-    // If current build number matches today's date format, increment the suffix
-    if (currentBuildNumber.length == 8 &&
-        currentBuildNumber.startsWith(datePrefix)) {
-      final currentSuffix = int.parse(currentBuildNumber.substring(6));
-      return '$datePrefix${(currentSuffix + 1).toString().padLeft(2, '0')}';
+  String? _dailyBuild(String? current, String datePrefix) {
+    if (current == null ||
+        current.length != 8 ||
+        !current.startsWith(datePrefix)) {
+      return '${datePrefix}00';
     }
-
-    // Otherwise start with 00 for today
-    return '${datePrefix}00';
+    final next = int.parse(current.substring(6)) + 1;
+    if (next > 99) return null;
+    return '$datePrefix${next.toString().padLeft(2, '0')}';
   }
 
   /// Bumps the version number based on semver rules
@@ -105,19 +112,19 @@ class VersionBumpCommand extends Command<int> {
       throw FormatException('Invalid version format: $version');
     }
 
-    var majorVersion = int.parse(parts[0]);
-    var minorVersion = int.parse(parts[1]);
-    var patchVersion = int.parse(parts[2]);
+    var majorVersion = BigInt.parse(parts[0]);
+    var minorVersion = BigInt.parse(parts[1]);
+    var patchVersion = BigInt.parse(parts[2]);
 
     if (major) {
-      majorVersion++;
-      minorVersion = 0;
-      patchVersion = 0;
+      majorVersion += BigInt.one;
+      minorVersion = BigInt.zero;
+      patchVersion = BigInt.zero;
     } else if (minor) {
-      minorVersion++;
-      patchVersion = 0;
+      minorVersion += BigInt.one;
+      patchVersion = BigInt.zero;
     } else if (patch) {
-      patchVersion++;
+      patchVersion += BigInt.one;
     }
 
     return '$majorVersion.$minorVersion.$patchVersion';
@@ -128,6 +135,7 @@ class VersionBumpCommand extends Command<int> {
     try {
       final pubspecPath = argResults?['path'] as String;
       final isDryRun = argResults?['dry-run'] as bool;
+      final calendarVersion = argResults?['date-based-version'] as bool;
       final isDateBased = argResults?['date-based-build-number'] as bool;
       final isMajor = argResults?['major'] as bool;
       final isMinor = argResults?['minor'] as bool;
@@ -142,6 +150,13 @@ class VersionBumpCommand extends Command<int> {
       if (versionFlagCount > 1) {
         _logger
             .err('Only one of --major, --minor, or --patch can be specified');
+        return ExitCode.usage.code;
+      }
+
+      if (calendarVersion && versionFlagCount > 0) {
+        _logger.err(
+          'Use --date-based-version without --major, --minor or --patch',
+        );
         return ExitCode.usage.code;
       }
 
@@ -169,28 +184,30 @@ class VersionBumpCommand extends Command<int> {
 
       final content = await file.readAsString();
 
-      // Parse the version - support both formats: x.y.z and x.y.z+build
-      final versionPattern = RegExp(r'version:\s+(\d+\.\d+\.\d+)(?:\+(\d+))?');
-      final match = versionPattern.firstMatch(content);
-
-      if (match == null) {
+      final manifestVersion = ManifestVersion.parse(content);
+      if (manifestVersion == null) {
         _logger.err('Could not find valid version pattern in pubspec.yaml');
         return ExitCode.usage.code;
       }
 
-      final baseVersion = match.group(1)!;
-      final currentBuildNumber = match.group(2);
+      final parts = manifestVersion.value.split('+');
+      final baseVersion = parts.first;
+      final currentBuildNumber = parts.length == 2 ? parts.last : null;
       final hasBuildNumber = currentBuildNumber != null;
 
-      // Generate new version based on flags
-      final newBaseVersion = versionFlagCount > 0
-          ? _bumpVersion(
-              baseVersion,
-              major: isMajor,
-              minor: isMinor,
-              patch: isPatch,
-            )
-          : baseVersion;
+      // Use one local date for both halves if a build spans midnight.
+      final today = _calendarVersion(_now());
+      var newBaseVersion = baseVersion;
+      if (calendarVersion) {
+        newBaseVersion = today;
+      } else if (versionFlagCount > 0) {
+        newBaseVersion = _bumpVersion(
+          baseVersion,
+          major: isMajor,
+          minor: isMinor,
+          patch: isPatch,
+        );
+      }
 
       // Determine if we should include a build number in the new version
       final includeBuildNumber = !noBuildNumber &&
@@ -202,18 +219,21 @@ class VersionBumpCommand extends Command<int> {
       String newVersion;
       if (includeBuildNumber) {
         final newBuildNumber = isDateBased
-            ? _generateDateBasedBuildNumber(currentBuildNumber ?? '1')
+            ? _dailyBuild(currentBuildNumber, today.replaceAll('.', ''))
             : hasBuildNumber
-                ? ((int.parse(currentBuildNumber) + 1).toString())
+                ? (BigInt.parse(currentBuildNumber) + BigInt.one).toString()
                 : '1';
+        if (newBuildNumber == null) {
+          _logger.err('Daily build limit reached: the counter ends at 99.');
+          return ExitCode.usage.code;
+        }
         newVersion = '$newBaseVersion+$newBuildNumber';
       } else {
         newVersion = newBaseVersion;
       }
 
       // Replace the version in the content
-      final newContent =
-          content.replaceFirst(versionPattern, 'version: $newVersion');
+      final newContent = manifestVersion.replaceIn(content, newVersion);
 
       if (isDryRun) {
         final currentVersion =
@@ -244,7 +264,7 @@ class VersionBumpCommand extends Command<int> {
       }
 
       return ExitCode.success.code;
-    } catch (error) {
+    } on Exception catch (error) {
       _logger.err('$error');
       return ExitCode.software.code;
     }

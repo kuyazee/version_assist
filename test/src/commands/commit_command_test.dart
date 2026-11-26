@@ -6,9 +6,9 @@ import 'package:test/test.dart';
 import 'package:version_assist/src/command_runner.dart';
 import 'package:version_assist/src/git_client.dart';
 
-class _MockLogger extends Mock implements Logger {}
+import '../fixture.dart';
 
-class _MockFile extends Mock implements File {}
+class _MockLogger extends Mock implements Logger {}
 
 class _MockProgress extends Mock implements Progress {}
 
@@ -16,6 +16,7 @@ class _MockGitClient extends Mock implements GitClient {}
 
 void main() {
   group('commit', () {
+    late CommandFixture fixture;
     late Logger logger;
     late Progress progress;
     late GitClient gitClient;
@@ -27,12 +28,15 @@ void main() {
     });
 
     setUp(() {
+      fixture = CommandFixture();
+      addTearDown(fixture.dispose);
       logger = _MockLogger();
       progress = _MockProgress();
       gitClient = _MockGitClient();
       commandRunner = VersionAssistCommandRunner(
         logger: logger,
         gitClient: gitClient,
+        pubUpdater: fixture.updater,
       );
 
       // Set up default mock behavior for logger
@@ -45,7 +49,8 @@ void main() {
       when(() => progress.fail(any())).thenReturn(null);
 
       // Set up default mock behavior for git client
-      when(() => gitClient.isFileStaged(any())).thenAnswer((_) async => false);
+      when(() => gitClient.listTags(any()))
+          .thenAnswer((_) async => ProcessResult(0, 0, '', ''));
       when(() => gitClient.stageFile(any())).thenAnswer(
         (_) async => ProcessResult(0, 0, '', ''),
       );
@@ -64,11 +69,10 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['commit', '--dry-run']);
+      final exitCode =
+          await fixture.run(commandRunner, ['commit', '--dry-run']);
 
       expect(exitCode, ExitCode.success.code);
       verify(
@@ -88,14 +92,12 @@ version: 1.0.0+1
     });
 
     test('handles missing pubspec.yaml', () async {
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => false);
-
-      final exitCode = await commandRunner.run(['commit']);
+      final exitCode = await fixture.run(commandRunner, ['commit']);
 
       expect(exitCode, ExitCode.usage.code);
-      verify(() => logger.err('pubspec.yaml not found at pubspec.yaml'))
-          .called(1);
+      verify(
+        () => logger.err('pubspec.yaml not found at ${fixture.pubspec.path}'),
+      ).called(1);
     });
 
     test('handles invalid version format', () async {
@@ -105,11 +107,9 @@ description: A test application
 version: invalid.version
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['commit']);
+      final exitCode = await fixture.run(commandRunner, ['commit']);
 
       expect(exitCode, ExitCode.usage.code);
       verify(() => logger.err('Could not find valid version in pubspec.yaml'))
@@ -123,14 +123,12 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
 
-      final exitCode = await commandRunner.run(['commit']);
+      final exitCode = await fixture.run(commandRunner, ['commit']);
 
       expect(exitCode, ExitCode.success.code);
-      verify(() => gitClient.stageFile('pubspec.yaml')).called(1);
+      verify(() => gitClient.stageFile(fixture.pubspec.path)).called(1);
       verify(
         () => gitClient.commit('build(version): Bump version to 1.0.0+1'),
       ).called(1);
@@ -148,17 +146,16 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
       when(() => gitClient.stageFile(any())).thenAnswer(
         (_) async => ProcessResult(0, 1, '', 'git add failed'),
       );
 
-      final exitCode = await commandRunner.run(['commit']);
+      final exitCode = await fixture.run(commandRunner, ['commit']);
 
       expect(exitCode, ExitCode.software.code);
-      verify(() => logger.err('Error during git add: git add failed')).called(1);
+      verify(() => logger.err('Error during git add: git add failed'))
+          .called(1);
     });
 
     test('handles git commit failure', () async {
@@ -168,14 +165,12 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
       when(() => gitClient.commit(any())).thenAnswer(
         (_) async => ProcessResult(0, 1, '', 'git commit failed'),
       );
 
-      final exitCode = await commandRunner.run(['commit']);
+      final exitCode = await fixture.run(commandRunner, ['commit']);
 
       expect(exitCode, ExitCode.software.code);
       verify(() => logger.err('Error during git commit: git commit failed'))
@@ -189,17 +184,16 @@ description: A test application
 version: 1.0.0+1
 ''';
 
-      final file = _MockFile();
-      when(file.exists).thenAnswer((_) async => true);
-      when(file.readAsString).thenAnswer((_) async => testPubspec);
+      fixture.pubspec.writeAsStringSync(testPubspec);
       when(() => gitClient.tag(any())).thenAnswer(
         (_) async => ProcessResult(0, 1, '', 'git tag failed'),
       );
 
-      final exitCode = await commandRunner.run(['commit']);
+      final exitCode = await fixture.run(commandRunner, ['commit']);
 
       expect(exitCode, ExitCode.software.code);
-      verify(() => logger.err('Error during git tag: git tag failed')).called(1);
+      verify(() => logger.err('Error during git tag: git tag failed'))
+          .called(1);
     });
   });
 }

@@ -1,0 +1,11 @@
+.dart_tool/
+.packages
+pubspec.lock
+build/
+coverage/
+.idea/
+.github/
+.DS_Store
+.test_coverage.dart
+.test_runner.dart
+coverage_badge.svg

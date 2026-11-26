@@ -15,7 +15,7 @@ class _MockProgress extends Mock implements Progress {}
 class _MockPubUpdater extends Mock implements PubUpdater {}
 
 void main() {
-  const latestVersion = '0.0.0';
+  const latestVersion = '10.0.0';
 
   group('update', () {
     late PubUpdater pubUpdater;
@@ -24,7 +24,6 @@ void main() {
 
     setUp(() {
       final progress = _MockProgress();
-      final progressLogs = <String>[];
       pubUpdater = _MockPubUpdater();
       logger = _MockLogger();
       commandRunner = VersionAssistCommandRunner(
@@ -35,24 +34,6 @@ void main() {
       when(
         () => pubUpdater.getLatestVersion(any()),
       ).thenAnswer((_) async => packageVersion);
-      when(
-        () => pubUpdater.update(
-          packageName: packageName,
-          versionConstraint: latestVersion,
-        ),
-      ).thenAnswer(
-        (_) async => ProcessResult(0, ExitCode.success.code, '', ''),
-      );
-      when(
-        () => pubUpdater.isUpToDate(
-          packageName: any(named: 'packageName'),
-          currentVersion: any(named: 'currentVersion'),
-        ),
-      ).thenAnswer((_) async => true);
-      when(() => progress.complete(any())).thenAnswer((answer) {
-        final message = answer.positionalArguments.elementAt(0) as String?;
-        if (message != null) progressLogs.add(message);
-      });
       when(() => logger.progress(any())).thenReturn(progress);
     });
 
@@ -132,6 +113,32 @@ void main() {
         ).called(1);
       },
     );
+
+    test('keeps a local version ahead of the published one', () async {
+      when(() => pubUpdater.getLatestVersion(any()))
+          .thenAnswer((_) async => '0.0.1');
+
+      expect(await commandRunner.run(['update']), ExitCode.success.code);
+      verifyNever(
+        () => pubUpdater.update(
+          packageName: any(named: 'packageName'),
+          versionConstraint: any(named: 'versionConstraint'),
+        ),
+      );
+    });
+
+    test('rejects malformed registry versions without installing', () async {
+      when(() => pubUpdater.getLatestVersion(any()))
+          .thenAnswer((_) async => 'invalid');
+
+      expect(await commandRunner.run(['update']), ExitCode.software.code);
+      verifyNever(
+        () => pubUpdater.update(
+          packageName: any(named: 'packageName'),
+          versionConstraint: any(named: 'versionConstraint'),
+        ),
+      );
+    });
 
     test(
       'does not update when already on latest version',
